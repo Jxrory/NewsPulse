@@ -1,0 +1,158 @@
+# 设计示例；应用配置解析器尚未实现。正文默认值与此文件共同构成交接规格。
+app:
+  data_dir: /var/lib/newspulse
+  display_timezone: Asia/Shanghai
+  annual_timezone: Asia/Shanghai  # 初始化后不得直接改动，应做数据迁移设计
+  log_level: info
+
+http:
+  listen: 127.0.0.1:8080
+  admin_token_env: NEWSPULSE_ADMIN_TOKEN
+
+storage:
+  filename_pattern: news-%04d.sqlite
+  journal_mode: WAL
+  synchronous: FULL
+  busy_timeout: 5s
+  read_connections_per_shard: 2
+  max_open_shards: 8
+
+fetch:
+  max_concurrent: 4
+  max_per_host: 1
+  request_timeout: 20s
+  connect_timeout: 5s
+  max_response_bytes: 4194304
+  max_redirects: 5
+  user_agent: NewsPulse/0.1
+  jitter_ratio: 0.1
+  stale_after: 24h
+  future_tolerance: 15m
+
+schedule:
+  enabled: false           # 用户尚未确定时间，禁止实现时自动改为true
+  id: daily-news
+  timezone: Asia/Shanghai
+  times: []               # 例：["07:15"]；只作注释，不代表已选时间
+  lookback: 24h
+  prepare_before: 5m
+  generation_timeout: 5m
+  catchup_max_age: 6h
+  catchup_slots: 1
+  notification_ttl: 6h
+
+editorial:
+  min_per_section: 5
+  target_per_section: 6
+  max_per_section: 8
+  max_candidates: 120
+  max_publisher_share_international: 0.5
+  late_arrival_max_age: 48h
+  allow_undated_on_cold_start: false
+  include_full_article_fetch: false
+  repeat_policy: suppress_unchanged_events
+
+llm:
+  enabled: true
+  adapter: chat_completions
+  base_url_env: LLM_BASE_URL
+  api_key_env: LLM_API_KEY
+  model_env: LLM_MODEL
+  response_mode: json_object
+  request_timeout: 90s
+  max_concurrent: 1
+  max_input_tokens: 24000
+  max_output_tokens: 6000
+  max_repair_attempts: 1
+  prompt_version: news-zh-v1
+  daily_max_requests: 20
+  daily_max_reserved_tokens: 200000
+  fallback: rss_summary
+
+notification:
+  enabled: false          # 真正联调时显式启用；不影响本地生成草稿
+  provider: feishu_webhook
+  recipient_alias: news-group
+  webhook_url_env: FEISHU_WEBHOOK_URL
+  sign_secret_env: FEISHU_SIGN_SECRET
+  require_signature: true
+  message_type: post
+  required_keyword: ""    # 机器人配置关键词校验时填写，并由模板稳定包含
+  timeout: 20s
+  follow_redirects: false
+  max_payload_bytes: 18000  # 含JSON封装、转义和timestamp/sign的最终请求体
+  min_send_interval: 1s
+  max_send_attempts: 3
+  daily_request_budget: 20 # 项目自限；测试/重发也计入，非飞书官方每日额度
+  retry_unknown: false
+  split_long_messages: false
+
+backup:
+  enabled: true
+  interval: 24h
+  pause_writes_timeout: 60s
+  keep_daily: 14
+  keep_weekly: 8
+  keep_monthly: 12
+  remote_copy_enabled: false  # 上线前配置异地备份
+
+sources:
+  - id: bbc_world
+    url: https://feeds.bbci.co.uk/news/world/rss.xml
+    publisher_id: bbc
+    publisher_group: bbc
+    language: en
+    section_hint: international
+    poll_interval: 10m
+    enabled: true
+  - id: guardian_world
+    url: https://www.theguardian.com/world/rss
+    publisher_id: guardian
+    publisher_group: guardian
+    language: en
+    section_hint: international
+    poll_interval: 10m
+    enabled: true
+  - id: aljazeera_all
+    url: https://www.aljazeera.com/xml/rss/all.xml
+    publisher_id: aljazeera
+    publisher_group: aljazeera
+    language: en
+    section_hint: international
+    poll_interval: 10m
+    enabled: true
+  - id: dw_top
+    url: https://rss.dw.com/rdf/rss-en-top
+    publisher_id: dw
+    publisher_group: dw
+    language: en
+    section_hint: international
+    poll_interval: 10m
+    enabled: true
+  - id: cns_china
+    url: https://www.chinanews.com.cn/rss/china.xml
+    publisher_id: chinanews
+    publisher_group: cns
+    language: zh
+    section_hint: domestic
+    timezone_hint: Asia/Shanghai
+    poll_interval: 5m
+    enabled: true
+  - id: cns_finance
+    url: https://www.chinanews.com.cn/rss/finance.xml
+    publisher_id: chinanews
+    publisher_group: cns
+    language: zh
+    section_hint: mixed
+    timezone_hint: Asia/Shanghai
+    poll_interval: 5m
+    enabled: true
+  - id: cns_society
+    url: https://www.chinanews.com.cn/rss/society.xml
+    publisher_id: chinanews
+    publisher_group: cns
+    language: zh
+    section_hint: domestic
+    timezone_hint: Asia/Shanghai
+    poll_interval: 5m
+    enabled: true

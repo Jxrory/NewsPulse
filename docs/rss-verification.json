@@ -1,0 +1,177 @@
+{
+  "checked_for_client_date": "2026-11-24",
+  "scope": "开发机一次性探测；不是部署VPS可用性承诺",
+  "feeds": [
+    {
+      "id": "bbc_world",
+      "url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+      "http_status": 200,
+      "final_url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+      "content_type": "text/xml; charset=utf-8",
+      "bytes": 18774,
+      "root": "rss",
+      "items": 24,
+      "parsed_dates": 24,
+      "latest_published": "2026-11-24T10:58:51+00:00"
+    },
+    {
+      "id": "guardian_world",
+      "url": "https://www.theguardian.com/world/rss",
+      "http_status": 200,
+      "final_url": "https://www.theguardian.com/world/rss",
+      "content_type": "text/xml; charset=UTF-8",
+      "bytes": 151672,
+      "root": "rss",
+      "items": 45,
+      "parsed_dates": 45,
+      "latest_published": "2026-11-24T11:06:08+00:00"
+    },
+    {
+      "id": "aljazeera_all",
+      "url": "https://www.aljazeera.com/xml/rss/all.xml",
+      "http_status": 200,
+      "final_url": "https://www.aljazeera.com/xml/rss/all.xml",
+      "content_type": "application/rss+xml; charset=UTF-8",
+      "bytes": 17085,
+      "root": "rss",
+      "items": 25,
+      "parsed_dates": 25,
+      "latest_published": "2026-11-24T10:48:38+00:00"
+    },
+    {
+      "id": "dw_top",
+      "url": "https://rss.dw.com/rdf/rss-en-top",
+      "http_status": 200,
+      "final_url": "https://rss.dw.com/rdf/rss-en-top",
+      "content_type": "text/xml; charset=UTF-8",
+      "bytes": 20281,
+      "root": "{http://www.w3.org/1999/02/22-rdf-syntax-ns#}RDF",
+      "items": 21,
+      "parsed_dates": 21,
+      "latest_published": "2026-11-24T11:03:00+00:00"
+    },
+    {
+      "id": "cns_headlines",
+      "url": "https://www.chinanews.com.cn/rss/importnews.xml",
+      "http_status": 200,
+      "final_url": "https://www.chinanews.com.cn/rss/importnews.xml",
+      "content_type": "text/xml",
+      "bytes": 16130,
+      "root": "rss",
+      "items": 30,
+      "parsed_dates": 30,
+      "latest_published": "2026-11-24T09:01:21+00:00"
+    },
+    {
+      "id": "cns_china",
+      "url": "https://www.chinanews.com.cn/rss/china.xml",
+      "http_status": 200,
+      "final_url": "https://www.chinanews.com.cn/rss/china.xml",
+      "content_type": "text/xml",
+      "bytes": 16758,
+      "root": "rss",
+      "items": 30,
+      "parsed_dates": 30,
+      "latest_published": "2026-11-24T11:05:46+00:00"
+    },
+    {
+      "id": "cns_finance",
+      "url": "https://www.chinanews.com.cn/rss/finance.xml",
+      "http_status": 200,
+      "final_url": "https://www.chinanews.com.cn/rss/finance.xml",
+      "content_type": "text/xml",
+      "bytes": 15952,
+      "root": "rss",
+      "items": 30,
+      "parsed_dates": 30,
+      "latest_published": "2026-11-24T10:57:34+00:00"
+    },
+    {
+      "id": "cns_society",
+      "url": "https://www.chinanews.com.cn/rss/society.xml",
+      "http_status": 200,
+      "final_url": "https://www.chinanews.com.cn/rss/society.xml",
+      "content_type": "text/xml",
+      "bytes": 16359,
+      "root": "rss",
+      "items": 30,
+      "parsed_dates": 30,
+      "latest_published": "2026-11-24T10:54:45+00:00"
+    },
+    {
+      "id": "cns_scroll",
+      "url": "https://www.chinanews.com.cn/rss/scroll-news.xml",
+      "http_status": 200,
+      "final_url": "https://www.chinanews.com.cn/rss/scroll-news.xml",
+      "content_type": "text/xml",
+      "bytes": 18244,
+      "root": "rss",
+      "items": 30,
+      "parsed_dates": 30,
+      "latest_published": "2026-11-24T11:27:45+00:00"
+    },
+    {
+      "id": "cctv_domestic",
+      "url": "http://www.cctv.com/program/rss/02/01/index.xml",
+      "error": "<urlopen error unknown url type: socks5>"
+    },
+    {
+      "id": "people_politics",
+      "url": "http://www.people.com.cn/rss/politics.xml",
+      "error": "<urlopen error unknown url type: socks5>"
+    },
+    {
+      "id": "google_reuters",
+      "url": "https://news.google.com/rss/search?q=when%3A24h%20site%3Areuters.com&ceid=US%3Aen&hl=en-US&gl=US",
+      "http_status": 200,
+      "final_url": "https://news.google.com/rss/search?q=when%3A24h%20site%3Areuters.com&ceid=US%3Aen&hl=en-US&gl=US",
+      "content_type": "application/xml; charset=utf-8",
+      "bytes": 130294,
+      "root": "rss",
+      "items": 100,
+      "parsed_dates": 100,
+      "latest_published": "2026-11-24T11:11:30+00:00"
+    }
+  ],
+  "legacy_endpoint_followup": [
+    {
+      "url": "http://www.cctv.com/program/rss/02/01/index.xml",
+      "curl_exit": 0,
+      "http_status": "200",
+      "error": "",
+      "parse_error": "multi-byte encodings are not supported"
+    },
+    {
+      "url": "https://www.cctv.com/program/rss/02/01/index.xml",
+      "curl_exit": 0,
+      "http_status": "200",
+      "error": "",
+      "parse_error": "multi-byte encodings are not supported"
+    },
+    {
+      "url": "http://www.people.com.cn/rss/politics.xml",
+      "curl_exit": 0,
+      "http_status": "200",
+      "error": "",
+      "root": "rss",
+      "items": 100,
+      "sample_pubdates": [
+        "2025-06-05 20:50:18",
+        "2025-06-05"
+      ]
+    },
+    {
+      "url": "https://www.people.com.cn/rss/politics.xml",
+      "curl_exit": 28,
+      "http_status": "200",
+      "error": "curl: (28) Operation timed out after 15001 milliseconds with 130416 out of 382202 bytes received",
+      "parse_error": "unclosed CDATA section: line 245, column 341"
+    }
+  ],
+  "legacy_encoding_followup": {
+    "url": "https://www.cctv.com/program/rss/02/01/index.xml",
+    "curl_exit": 0,
+    "declared_encoding": null,
+    "error": "syntax error: line 1, column 0"
+  }
+}
