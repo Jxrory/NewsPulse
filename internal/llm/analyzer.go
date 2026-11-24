@@ -138,7 +138,24 @@ func (a *Analyzer) Analyze(ctx context.Context, jobID string, ownerYear int, sna
 					"\n可用的文章 ID 仅限候选材料中的 refs。请只输出修复后的 JSON。"},
 			}
 		}
-		call, content, usage, apiErr := a.doCall(ctx, shard, jobID, model, inputHash, estimatedInput, messages)
+		var call *storage.LLMCallReserve
+		var content string
+		var usage usageInfo
+		var apiErr error
+		for retry := 0; retry < llmTransientAttempts; retry++ {
+			call, content, usage, apiErr = a.doCall(ctx, shard, jobID, model, inputHash, estimatedInput, messages)
+			if apiErr == nil || !retryableLLMError(apiErr) || retry == llmTransientAttempts-1 {
+				break
+			}
+			delay := llmRetryBaseDelay * time.Duration(1<<retry)
+			a.log.Warn("llm transient error; retrying", "job_id", jobID, "attempt", attempt,
+				"retry", retry+1, "delay", delay.String(), "error", logging.ErrorString(apiErr))
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
 		if apiErr != nil {
 			lastErr = apiErr
 			break
@@ -233,6 +250,21 @@ type chatResponse struct {
 		Type    string      `json:"type"`
 		Code    interface{} `json:"code"`
 	} `json:"error"`
+}
+
+var llmRetryBaseDelay = 5 * time.Second
+
+const llmTransientAttempts = 4
+
+func retryableLLMError(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	if apiErr.Code == "timeout" || apiErr.Code == "transport_error" {
+		return true
+	}
+	return apiErr.HTTPStatus == http.StatusTooManyRequests || apiErr.HTTPStatus >= 500
 }
 
 func (a *Analyzer) doCall(ctx context.Context, shard *storage.Shard, jobID, model, inputHash string,

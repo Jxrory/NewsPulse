@@ -162,3 +162,66 @@ func TestAnalyzeHTTPCacheAndBudget(t *testing.T) {
 	}
 	_ = clk
 }
+
+func TestAnalyzeRetriesTransientAPIErrors(t *testing.T) {
+	oldDelay := llmRetryBaseDelay
+	llmRetryBaseDelay = 10 * time.Millisecond
+	defer func() { llmRetryBaseDelay = oldDelay }()
+
+	var requests int32
+	validContent := `{"schema_version":1,"events":[{"event_key":"e1","section":"international","article_refs":[{"year":2026,"id":"a1"}],"title_zh":"标题","facts":[{"text":"事实内容","evidence_refs":["a1"]}],"background":"","impact":"","importance":80,"warnings":[]}]}`
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&requests, 1)
+		w.Header().Set("Content-Type", "application/json")
+		if n <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`[{"error":{"code":503,"message":"high demand","status":"UNAVAILABLE"}}]`))
+			return
+		}
+		_, _ = w.Write(chatBody(validContent, 50, 30))
+	}
+	an, mgr, _ := llmAnalyzerSetup(t, handler)
+	res, err := an.Analyze(context.Background(), "job-retry", 2026, testSnapshot("a1", "summary"))
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	if len(res.Events) != 1 || res.Mode != "ai" {
+		t.Fatalf("result=%+v", res)
+	}
+	if got := atomic.LoadInt32(&requests); got != 3 {
+		t.Fatalf("requests=%d want 3", got)
+	}
+	shard, err := mgr.Open(2026)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var failed, succeeded int
+	if err := shard.R().QueryRow(`SELECT count(*) FROM llm_calls WHERE status='failed'`).Scan(&failed); err != nil {
+		t.Fatal(err)
+	}
+	if err := shard.R().QueryRow(`SELECT count(*) FROM llm_calls WHERE status='succeeded'`).Scan(&succeeded); err != nil {
+		t.Fatal(err)
+	}
+	if failed != 2 || succeeded != 1 {
+		t.Fatalf("failed=%d succeeded=%d", failed, succeeded)
+	}
+}
+
+func TestRetryableLLMErrorOnlyTransient(t *testing.T) {
+	cases := []struct {
+		err  error
+		want bool
+	}{
+		{&APIError{Code: "http_503", HTTPStatus: 503}, true},
+		{&APIError{Code: "http_429", HTTPStatus: 429}, true},
+		{&APIError{Code: "timeout"}, true},
+		{&APIError{Code: "http_400", HTTPStatus: 400}, false},
+		{&APIError{Code: "empty_output"}, false},
+		{errors.New("plain"), false},
+	}
+	for _, c := range cases {
+		if got := retryableLLMError(c.err); got != c.want {
+			t.Fatalf("retryableLLMError(%v)=%v want %v", c.err, got, c.want)
+		}
+	}
+}

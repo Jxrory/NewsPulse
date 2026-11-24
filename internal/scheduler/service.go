@@ -739,6 +739,6 @@ func (s *Service) CreateFetchJob(ctx context.Context) (*storage.JobWithYear, err
 }
 
 // AppVersion is the reported application version.
-const AppVersion = "0.1.0-dev"
+const AppVersion = "0.1.1"
 
 func ptr(v int64) *int64 { return &v }
