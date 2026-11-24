@@ -1,0 +1,13 @@
+/newspulse
+/dist/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.log
+.env
+*.env
+/configs/config.yaml
+/docs/tmp.md
+/deploy/docker/config.yaml
+/deploy/docker/data/
+/vendor/

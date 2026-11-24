@@ -1,0 +1,33 @@
+name: newspulse
+
+services:
+  newspulse:
+    image: newspulse:0.1.0
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    container_name: newspulse
+    restart: unless-stopped
+    stop_grace_period: 30s
+    env_file:
+      - newspulse.env
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./config.yaml:/etc/newspulse/config.yaml:ro
+      - data:/var/lib/newspulse
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/newspulse", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  data:
+    name: newspulse-data

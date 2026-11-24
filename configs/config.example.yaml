@@ -1,0 +1,169 @@
+# NewsPulse example configuration.
+# Copy to /etc/newspulse/config.yaml and fill secrets via environment variables
+# in /etc/newspulse/newspulse.env (0600). Never commit real secrets.
+#
+# Scheduled push is deliberately disabled until a push time is explicitly
+# confirmed. LLM_MODEL / LLM_BASE_URL / LLM_API_KEY must be set before
+# production use (config validation requires them while llm.enabled=true).
+app:
+  data_dir: /var/lib/newspulse
+  display_timezone: Asia/Shanghai
+  annual_timezone: Asia/Shanghai  # do not change after first initialization
+  log_level: info
+
+http:
+  listen: 127.0.0.1:8080
+  admin_token_env: NEWSPULSE_ADMIN_TOKEN
+
+storage:
+  filename_pattern: news-%04d.sqlite
+  journal_mode: WAL
+  synchronous: FULL
+  busy_timeout: 5s
+  read_connections_per_shard: 2
+  max_open_shards: 8
+
+fetch:
+  max_concurrent: 4
+  max_per_host: 1
+  request_timeout: 20s
+  connect_timeout: 5s
+  max_response_bytes: 4194304
+  max_redirects: 5
+  user_agent: NewsPulse/0.1
+  jitter_ratio: 0.1
+  stale_after: 24h
+  future_tolerance: 15m
+
+schedule:
+  enabled: false           # never flip this without a confirmed delivery time
+  id: daily-news
+  timezone: Asia/Shanghai
+  times: []                # e.g. ["07:15"] is only an example, not a choice
+  lookback: 24h
+  prepare_before: 5m
+  generation_timeout: 5m
+  catchup_max_age: 6h
+  catchup_slots: 1
+  notification_ttl: 6h
+
+editorial:
+  min_per_section: 5
+  target_per_section: 6
+  max_per_section: 8
+  max_candidates: 120
+  max_publisher_share_international: 0.5
+  late_arrival_max_age: 48h
+  allow_undated_on_cold_start: false
+  include_full_article_fetch: false
+  repeat_policy: suppress_unchanged_events
+
+llm:
+  enabled: true
+  adapter: chat_completions
+  base_url_env: LLM_BASE_URL
+  api_key_env: LLM_API_KEY
+  model_env: LLM_MODEL
+  response_mode: json_object  # json_object|json_schema|text
+  request_timeout: 90s
+  max_concurrent: 1
+  max_input_tokens: 24000
+  max_output_tokens: 6000
+  max_repair_attempts: 1
+  prompt_version: news-zh-v1
+  daily_max_requests: 20
+  daily_max_reserved_tokens: 200000
+  fallback: rss_summary       # rss_summary|none
+  # Optional estimated prices, micros per million tokens. Used only for
+  # local cost estimates; the provider bill remains authoritative.
+  input_price_micros_per_mtok: 0
+  output_price_micros_per_mtok: 0
+  currency: CNY
+
+notification:
+  enabled: false          # local drafts always work; enable only after Feishu setup
+  provider: feishu_webhook
+  recipient_alias: news-group
+  webhook_url_env: FEISHU_WEBHOOK_URL
+  sign_secret_env: FEISHU_SIGN_SECRET
+  require_signature: true
+  message_type: post
+  required_keyword: ""    # fill only if the bot has a keyword restriction
+  timeout: 20s
+  follow_redirects: false
+  max_payload_bytes: 18000  # final JSON request incl timestamp/sign
+  min_send_interval: 1s
+  max_send_attempts: 3
+  daily_request_budget: 20
+  retry_unknown: false
+  split_long_messages: false  # message splitting is not implemented in v1
+
+backup:
+  enabled: true
+  interval: 24h
+  pause_writes_timeout: 60s
+  keep_daily: 14
+  keep_weekly: 8
+  keep_monthly: 12
+  remote_copy_enabled: false  # configure off-site copy before claiming 3-2-1
+
+sources:
+  - id: bbc_world
+    url: https://feeds.bbci.co.uk/news/world/rss.xml
+    publisher_id: bbc
+    publisher_group: bbc
+    language: en
+    section_hint: international
+    poll_interval: 10m
+    enabled: true
+  - id: guardian_world
+    url: https://www.theguardian.com/world/rss
+    publisher_id: guardian
+    publisher_group: guardian
+    language: en
+    section_hint: international
+    poll_interval: 10m
+    enabled: true
+  - id: aljazeera_all
+    url: https://www.aljazeera.com/xml/rss/all.xml
+    publisher_id: aljazeera
+    publisher_group: aljazeera
+    language: en
+    section_hint: international
+    poll_interval: 10m
+    enabled: true
+  - id: dw_top
+    url: https://rss.dw.com/rdf/rss-en-top
+    publisher_id: dw
+    publisher_group: dw
+    language: en
+    section_hint: international
+    poll_interval: 10m
+    enabled: true
+  - id: cns_china
+    url: https://www.chinanews.com.cn/rss/china.xml
+    publisher_id: chinanews
+    publisher_group: cns
+    language: zh
+    section_hint: domestic
+    timezone_hint: Asia/Shanghai
+    poll_interval: 5m
+    enabled: true
+  - id: cns_finance
+    url: https://www.chinanews.com.cn/rss/finance.xml
+    publisher_id: chinanews
+    publisher_group: cns
+    language: zh
+    section_hint: mixed
+    timezone_hint: Asia/Shanghai
+    poll_interval: 5m
+    enabled: true
+  - id: cns_society
+    url: https://www.chinanews.com.cn/rss/society.xml
+    publisher_id: chinanews
+    publisher_group: cns
+    language: zh
+    section_hint: domestic
+    timezone_hint: Asia/Shanghai
+    poll_interval: 5m
+    enabled: true

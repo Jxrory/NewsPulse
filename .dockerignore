@@ -1,0 +1,17 @@
+.git
+.gitignore
+.dockerignore
+docs
+testdata
+README.md
+configs
+deploy/docker/config.yaml
+deploy/docker/data
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.log
+.env
+*.env
+**/*_test.go
+/vendor/

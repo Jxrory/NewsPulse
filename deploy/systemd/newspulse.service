@@ -1,0 +1,28 @@
+[Unit]
+Description=NewsPulse news digest service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=newspulse
+Group=newspulse
+WorkingDirectory=/var/lib/newspulse
+ExecStart=/opt/newspulse/bin/newspulse serve --config /etc/newspulse/config.yaml
+EnvironmentFile=/etc/newspulse/newspulse.env
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=30s
+LimitNOFILE=4096
+
+# Secrets stay readable by the service user only.
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/newspulse
+ReadOnlyPaths=/etc/newspulse
+
+[Install]
+WantedBy=multi-user.target
