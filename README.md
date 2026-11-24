@@ -185,7 +185,7 @@ cp newspulse.env.example newspulse.env
 chmod 600 newspulse.env
 # 编辑 config.yaml（保持 llm.enabled/schedule.enabled/notification.enabled 的既定状态）
 # 编辑 newspulse.env：至少填写 NEWSPULSE_ADMIN_TOKEN、LLM_BASE_URL、LLM_API_KEY、LLM_MODEL
-docker compose build --no-cache --build-arg GOPROXY=https://goproxy.cn,direct
+docker build --no-cache --network=host --build-arg GOPROXY=https://goproxy.cn,direct -t newspulse:0.1.0 -f Dockerfile ../..
 docker compose up -d
 curl -sS http://127.0.0.1:8080/healthz
 docker compose logs -f
@@ -195,7 +195,8 @@ docker compose logs -f
 - 数据保存在命名卷 `newspulse-data`（`/var/lib/newspulse`）；备份可用 `docker cp newspulse:/var/lib/newspulse/backups ./backups` 导出。
 - 镜像无 shell，CLI 通过 `docker compose exec newspulse /newspulse ...` 执行；daemon 运行时写命令会自动走本地 API。
 - 修改 `config.yaml` 或 `newspulse.env` 后执行 `docker compose up -d --force-recreate`。
-- 不使用 Compose 时也可直接构建：`docker build --no-cache --build-arg GOPROXY=https://goproxy.cn,direct -t newspulse:0.1.0 -f deploy/docker/Dockerfile .`。
+- `docker build` 使用 `--network=host` 规避 Docker Desktop BuildKit 的 DNS 解析不稳定；Compose 只负责运行已有镜像，运行阶段仍是隔离网络。
+- 在仓库根目录构建时可用：`docker build --no-cache --network=host --build-arg GOPROXY=https://goproxy.cn,direct -t newspulse:0.1.0 -f deploy/docker/Dockerfile .`。
 
 ## 测试
 
