@@ -74,6 +74,16 @@ llm:
   daily_max_requests: 20
   daily_max_reserved_tokens: 200000
   fallback: rss_summary       # rss_summary|none
+  # Optional ordered providers tried after the primary provider exhausts its
+  # transient retries. Adapter/response mode are per-provider so a Gemini
+  # primary can fall back to a DeepSeek-compatible endpoint.
+  # fallback_providers:
+  #   - name: deepseek
+  #     adapter: chat_completions
+  #     base_url_env: DEEPSEEK_BASE_URL
+  #     api_key_env: DEEPSEEK_API_KEY
+  #     model_env: DEEPSEEK_MODEL
+  #     response_mode: json_object
   # Optional estimated prices, micros per million tokens. Used only for
   # local cost estimates; the provider bill remains authoritative.
   input_price_micros_per_mtok: 0

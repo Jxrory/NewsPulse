@@ -143,6 +143,59 @@ func TestNotificationAndLLMValidation(t *testing.T) {
 	}
 }
 
+func TestLLMFallbackValidation(t *testing.T) {
+	c := baseConfig(t)
+	c.LLM.Enabled = true
+	c.LLM.DailyMaxRequests = 1
+	c.LLM.MaxInputTokens = 1000
+	c.LLM.MaxOutputTokens = 100
+	c.LLM.MaxConcurrent = 1
+	os.Setenv("LLM_BASE_URL", "https://api.example.com/v1")
+	os.Setenv("LLM_API_KEY", "secret")
+	os.Setenv("LLM_MODEL", "test-model")
+	os.Setenv("FB_BASE_URL", "https://api.deepseek.com")
+	os.Setenv("FB_API_KEY", "secret2")
+	os.Setenv("FB_MODEL", "deepseek-flash")
+	defer os.Unsetenv("LLM_BASE_URL")
+	defer os.Unsetenv("LLM_API_KEY")
+	defer os.Unsetenv("LLM_MODEL")
+	defer os.Unsetenv("FB_BASE_URL")
+	defer os.Unsetenv("FB_API_KEY")
+	defer os.Unsetenv("FB_MODEL")
+
+	c.LLM.FallbackProviders = []LLMCredential{{
+		Name: "deepseek", Adapter: "chat_completions",
+		BaseURLEnv: "FB_BASE_URL", APIKeyEnv: "FB_API_KEY",
+		ModelEnv: "FB_MODEL", ResponseMode: "json_object",
+	}}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("valid fallback rejected: %v", err)
+	}
+
+	c.LLM.FallbackProviders = append(c.LLM.FallbackProviders, c.LLM.FallbackProviders[0])
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "duplicates") {
+		t.Fatalf("expected duplicate name error, got %v", err)
+	}
+
+	c.LLM.FallbackProviders = []LLMCredential{{
+		Name: "primary", Adapter: "chat_completions",
+		BaseURLEnv: "FB_BASE_URL", APIKeyEnv: "FB_API_KEY",
+		ModelEnv: "FB_MODEL", ResponseMode: "json_object",
+	}}
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "duplicates") {
+		t.Fatalf("expected reserved primary error, got %v", err)
+	}
+
+	c.LLM.FallbackProviders = []LLMCredential{{
+		Name: "broken", Adapter: "chat_completions",
+		BaseURLEnv: "FB_BASE_URL", APIKeyEnv: "FB_API_KEY",
+		ModelEnv: "UNSET_FB_MODEL", ResponseMode: "text",
+	}}
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "UNSET_FB_MODEL") {
+		t.Fatalf("expected unset env error, got %v", err)
+	}
+}
+
 func TestFeishuWebhookValidation(t *testing.T) {
 	good := "https://open.feishu.cn/open-apis/bot/v2/hook/abc-123"
 	if err := ValidateFeishuWebhook(good); err != nil {

@@ -54,6 +54,10 @@ NEWSPULSE_ADMIN_TOKEN=<随机长 token>
 LLM_BASE_URL=https://api.example.com/v1
 LLM_API_KEY=<模型供应商 key>
 LLM_MODEL=<模型名>
+# 可选：主供应商失败后按顺序尝试的备用供应商（需同时配置 llm.fallback_providers）
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_API_KEY=<备用供应商 key>
+DEEPSEEK_MODEL=deepseek-flash
 FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/<token>
 FEISHU_SIGN_SECRET=<飞书机器人签名密钥>
 ```
@@ -63,6 +67,7 @@ FEISHU_SIGN_SECRET=<飞书机器人签名密钥>
 - `schedule.enabled: false`、`times: []` — 未确认推送时刻前不会自动生成/发送。
 - `notification.enabled: false` — 只会生成草稿。
 - `llm.enabled: true` — 但必须填写 `LLM_*` 环境变量，`config validate` 会检查变量存在与取值合法性。
+- `llm.fallback_providers` — 可选的有序备用供应商。主供应商瞬时错误重试耗尽（429/5xx/超时）后自动切换，每个供应商可独立指定模型、端点与 `response_mode`。
 
 ```bash
 NEWSPULSE_ADMIN_TOKEN=x LLM_BASE_URL=... LLM_API_KEY=... LLM_MODEL=... \

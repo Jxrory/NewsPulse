@@ -2,7 +2,7 @@ name: newspulse
 
 services:
   newspulse:
-    image: newspulse:0.1.1
+    image: newspulse:0.1.2
     container_name: newspulse
     restart: unless-stopped
     stop_grace_period: 30s

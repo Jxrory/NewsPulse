@@ -75,6 +75,8 @@ func (m *ShardManager) DailyLLMSpend(ctx context.Context, dayStart, dayEnd int64
 
 type CachedAnalysis struct {
 	CacheKey   string
+	Provider   string
+	Model      string
 	OutputJSON string
 	UsageJSON  string
 	CostMicros *int64
@@ -85,8 +87,8 @@ func (s *Shard) GetAnalysisCache(ctx context.Context, key string) (*CachedAnalys
 	defer s.opMu.RUnlock()
 	var c CachedAnalysis
 	var cost sql.NullInt64
-	err := s.r.QueryRowContext(ctx, `SELECT cache_key, output_json, usage_json, cost_estimate_micros
-		FROM analysis_cache WHERE cache_key=?`, key).Scan(&c.CacheKey, &c.OutputJSON, &c.UsageJSON, &cost)
+	err := s.r.QueryRowContext(ctx, `SELECT cache_key, provider, model, output_json, usage_json, cost_estimate_micros
+		FROM analysis_cache WHERE cache_key=?`, key).Scan(&c.CacheKey, &c.Provider, &c.Model, &c.OutputJSON, &c.UsageJSON, &cost)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

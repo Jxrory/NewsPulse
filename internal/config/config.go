@@ -93,25 +93,35 @@ type EditorialConfig struct {
 	RepeatPolicy                   string   `yaml:"repeat_policy"`
 }
 
+type LLMCredential struct {
+	Name         string `yaml:"name"`
+	Adapter      string `yaml:"adapter"`
+	BaseURLEnv   string `yaml:"base_url_env"`
+	APIKeyEnv    string `yaml:"api_key_env"`
+	ModelEnv     string `yaml:"model_env"`
+	ResponseMode string `yaml:"response_mode"`
+}
+
 type LLMConfig struct {
-	Enabled                  bool     `yaml:"enabled"`
-	Adapter                  string   `yaml:"adapter"`
-	BaseURLEnv               string   `yaml:"base_url_env"`
-	APIKeyEnv                string   `yaml:"api_key_env"`
-	ModelEnv                 string   `yaml:"model_env"`
-	ResponseMode             string   `yaml:"response_mode"`
-	RequestTimeout           Duration `yaml:"request_timeout"`
-	MaxConcurrent            int      `yaml:"max_concurrent"`
-	MaxInputTokens           int      `yaml:"max_input_tokens"`
-	MaxOutputTokens          int      `yaml:"max_output_tokens"`
-	MaxRepairAttempts        int      `yaml:"max_repair_attempts"`
-	PromptVersion            string   `yaml:"prompt_version"`
-	DailyMaxRequests         int      `yaml:"daily_max_requests"`
-	DailyMaxReservedTokens   int      `yaml:"daily_max_reserved_tokens"`
-	Fallback                 string   `yaml:"fallback"`
-	InputPriceMicrosPerMTok  int64    `yaml:"input_price_micros_per_mtok"`
-	OutputPriceMicrosPerMTok int64    `yaml:"output_price_micros_per_mtok"`
-	Currency                 string   `yaml:"currency"`
+	Enabled                  bool            `yaml:"enabled"`
+	Adapter                  string          `yaml:"adapter"`
+	BaseURLEnv               string          `yaml:"base_url_env"`
+	APIKeyEnv                string          `yaml:"api_key_env"`
+	ModelEnv                 string          `yaml:"model_env"`
+	ResponseMode             string          `yaml:"response_mode"`
+	RequestTimeout           Duration        `yaml:"request_timeout"`
+	MaxConcurrent            int             `yaml:"max_concurrent"`
+	MaxInputTokens           int             `yaml:"max_input_tokens"`
+	MaxOutputTokens          int             `yaml:"max_output_tokens"`
+	MaxRepairAttempts        int             `yaml:"max_repair_attempts"`
+	PromptVersion            string          `yaml:"prompt_version"`
+	DailyMaxRequests         int             `yaml:"daily_max_requests"`
+	DailyMaxReservedTokens   int             `yaml:"daily_max_reserved_tokens"`
+	Fallback                 string          `yaml:"fallback"`
+	InputPriceMicrosPerMTok  int64           `yaml:"input_price_micros_per_mtok"`
+	OutputPriceMicrosPerMTok int64           `yaml:"output_price_micros_per_mtok"`
+	Currency                 string          `yaml:"currency"`
+	FallbackProviders        []LLMCredential `yaml:"fallback_providers"`
 }
 
 type NotificationConfig struct {
@@ -486,6 +496,39 @@ func (c *Config) Validate() error {
 				add("%s references unset environment variable %s", def.name, def.env)
 			}
 		}
+		names := map[string]bool{"primary": true}
+		for i, f := range c.LLM.FallbackProviders {
+			prefix := fmt.Sprintf("llm.fallback_providers[%d]", i)
+			if f.Name == "" {
+				add("%s.name is required", prefix)
+			} else if names[f.Name] {
+				add("%s.name duplicates another provider", prefix)
+			} else {
+				names[f.Name] = true
+			}
+			if f.Adapter != "chat_completions" {
+				add("%s.adapter must be chat_completions", prefix)
+			}
+			switch f.ResponseMode {
+			case "json_object", "json_schema", "text":
+			default:
+				add("%s.response_mode must be json_object|json_schema|text", prefix)
+			}
+			for _, def := range []struct {
+				name string
+				env  string
+			}{
+				{"base_url_env", f.BaseURLEnv},
+				{"api_key_env", f.APIKeyEnv},
+				{"model_env", f.ModelEnv},
+			} {
+				if def.env == "" {
+					add("%s.%s is required", prefix, def.name)
+				} else if os.Getenv(def.env) == "" {
+					add("%s.%s references unset environment variable %s", prefix, def.name, def.env)
+				}
+			}
+		}
 	}
 
 	if c.Notification.Enabled {
@@ -667,9 +710,12 @@ func (c *Config) SourceByID(id string) (SourceConfig, bool) {
 	return SourceConfig{}, false
 }
 
-func (c *Config) LLMBaseURL() string    { return os.Getenv(c.LLM.BaseURLEnv) }
-func (c *Config) LLMAPIKey() string     { return os.Getenv(c.LLM.APIKeyEnv) }
-func (c *Config) LLMModel() string      { return os.Getenv(c.LLM.ModelEnv) }
-func (c *Config) FeishuWebhook() string { return os.Getenv(c.Notification.WebhookURLEnv) }
-func (c *Config) FeishuSecret() string  { return os.Getenv(c.Notification.SignSecretEnv) }
-func (c *Config) AdminToken() string    { return os.Getenv(c.HTTP.AdminTokenEnv) }
+func (c *Config) LLMBaseURL() string     { return os.Getenv(c.LLM.BaseURLEnv) }
+func (c *Config) LLMAPIKey() string      { return os.Getenv(c.LLM.APIKeyEnv) }
+func (c *Config) LLMModel() string       { return os.Getenv(c.LLM.ModelEnv) }
+func (c *LLMCredential) BaseURL() string { return os.Getenv(c.BaseURLEnv) }
+func (c *LLMCredential) APIKey() string  { return os.Getenv(c.APIKeyEnv) }
+func (c *LLMCredential) Model() string   { return os.Getenv(c.ModelEnv) }
+func (c *Config) FeishuWebhook() string  { return os.Getenv(c.Notification.WebhookURLEnv) }
+func (c *Config) FeishuSecret() string   { return os.Getenv(c.Notification.SignSecretEnv) }
+func (c *Config) AdminToken() string     { return os.Getenv(c.HTTP.AdminTokenEnv) }

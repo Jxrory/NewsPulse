@@ -163,6 +163,101 @@ func TestAnalyzeHTTPCacheAndBudget(t *testing.T) {
 	_ = clk
 }
 
+func TestAnalyzeFallsBackToSecondaryProvider(t *testing.T) {
+	oldDelay := llmRetryBaseDelay
+	llmRetryBaseDelay = time.Millisecond
+	defer func() { llmRetryBaseDelay = oldDelay }()
+
+	validContent := `{"schema_version":1,"events":[{"event_key":"e1","section":"international","article_refs":[{"year":2026,"id":"a1"}],"title_zh":"标题","facts":[{"text":"事实内容","evidence_refs":["a1"]}],"background":"","impact":"","importance":80,"warnings":[]}]}`
+	var primaryRequests, fallbackRequests int32
+	primary := func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&primaryRequests, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`[{"error":{"code":503,"message":"high demand","status":"UNAVAILABLE"}}]`))
+	}
+	fallback := func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&fallbackRequests, 1)
+		if r.Header.Get("Authorization") != "Bearer fallback-key" {
+			t.Errorf("fallback auth=%q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(chatBody(validContent, 50, 30))
+	}
+	an, mgr, _ := llmAnalyzerSetup(t, primary)
+	fbSrv := httptest.NewServer(http.HandlerFunc(fallback))
+	t.Cleanup(fbSrv.Close)
+	t.Setenv("TEST_FB_BASE_URL", fbSrv.URL)
+	t.Setenv("TEST_FB_API_KEY", "fallback-key")
+	t.Setenv("TEST_FB_MODEL", "fallback-model")
+	an.cfg.LLM.FallbackProviders = []config.LLMCredential{{
+		Name: "secondary", Adapter: "chat_completions",
+		BaseURLEnv: "TEST_FB_BASE_URL", APIKeyEnv: "TEST_FB_API_KEY",
+		ModelEnv: "TEST_FB_MODEL", ResponseMode: "json_object",
+	}}
+
+	res, err := an.Analyze(context.Background(), "job-fallback", 2026, testSnapshot("a1", "summary"))
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	if len(res.Events) != 1 || res.Mode != "ai" || res.Model != "fallback-model" {
+		t.Fatalf("result=%+v", res)
+	}
+	if got := atomic.LoadInt32(&primaryRequests); got != int32(llmTransientAttempts) {
+		t.Fatalf("primary requests=%d want %d", got, llmTransientAttempts)
+	}
+	if got := atomic.LoadInt32(&fallbackRequests); got != 1 {
+		t.Fatalf("fallback requests=%d want 1", got)
+	}
+	shard, err := mgr.Open(2026)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var succeeded int
+	if err := shard.R().QueryRow(`SELECT count(*) FROM llm_calls WHERE status='succeeded' AND model='fallback-model'`).Scan(&succeeded); err != nil {
+		t.Fatal(err)
+	}
+	if succeeded != 1 {
+		t.Fatalf("succeeded fallback calls=%d", succeeded)
+	}
+}
+
+func TestAnalyzeFallbackSkipsTransientRetryOnClientError(t *testing.T) {
+	validContent := `{"schema_version":1,"events":[{"event_key":"e1","section":"international","article_refs":[{"year":2026,"id":"a1"}],"title_zh":"标题","facts":[{"text":"事实内容","evidence_refs":["a1"]}],"background":"","impact":"","importance":80,"warnings":[]}]}`
+	var primaryRequests int32
+	primary := func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&primaryRequests, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"bad request"}}`))
+	}
+	fb := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(chatBody(validContent, 50, 30))
+	}
+	an, _, _ := llmAnalyzerSetup(t, primary)
+	fbSrv := httptest.NewServer(http.HandlerFunc(fb))
+	t.Cleanup(fbSrv.Close)
+	t.Setenv("TEST_FB_BASE_URL", fbSrv.URL)
+	t.Setenv("TEST_FB_API_KEY", "fallback-key")
+	t.Setenv("TEST_FB_MODEL", "fallback-model")
+	an.cfg.LLM.FallbackProviders = []config.LLMCredential{{
+		Name: "secondary", Adapter: "chat_completions",
+		BaseURLEnv: "TEST_FB_BASE_URL", APIKeyEnv: "TEST_FB_API_KEY",
+		ModelEnv: "TEST_FB_MODEL", ResponseMode: "json_object",
+	}}
+	res, err := an.Analyze(context.Background(), "job-fallback-400", 2026, testSnapshot("a1", "summary"))
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	if res.Model != "fallback-model" {
+		t.Fatalf("model=%q", res.Model)
+	}
+	if got := atomic.LoadInt32(&primaryRequests); got != 1 {
+		t.Fatalf("primary requests=%d want 1", got)
+	}
+}
+
 func TestAnalyzeRetriesTransientAPIErrors(t *testing.T) {
 	oldDelay := llmRetryBaseDelay
 	llmRetryBaseDelay = 10 * time.Millisecond

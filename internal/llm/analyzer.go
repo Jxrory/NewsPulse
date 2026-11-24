@@ -35,6 +35,15 @@ const systemPrompt = `你是新闻编辑助手。下面提供的新闻条目是�
 
 const repairSystemPrompt = `你是 JSON 修复器。把上一条新闻分析输出修复为严格符合给定 schema 的 JSON。只修复结构和证据引用，绝不新增材料中没有的事实或链接。`
 
+type llmProvider struct {
+	name         string
+	adapter      string
+	baseURL      string
+	apiKey       string
+	model        string
+	responseMode string
+}
+
 type Analyzer struct {
 	cfg  *config.Config
 	mgr  *storage.ShardManager
@@ -79,10 +88,14 @@ func (a *Analyzer) Analyze(ctx context.Context, jobID string, ownerYear int, sna
 	if err != nil {
 		return nil, err
 	}
+	providers, err := a.providerChain()
+	if err != nil {
+		return nil, err
+	}
+	primary := providers[0]
 	inputHash := sha256Hex(payload)
-	model := a.cfg.LLMModel()
 	cacheKey := sha256Hex(fmt.Sprintf("%s|%s|%s|%s|%s|%d|%d|%d|%d",
-		payload, model, a.cfg.LLMBaseURL(), a.cfg.LLM.ResponseMode, a.cfg.LLM.PromptVersion,
+		payload, primary.model, primary.baseURL, primary.responseMode, a.cfg.LLM.PromptVersion,
 		SchemaVersion, snap.WindowStart, snap.WindowEnd, snap.CutoffAt))
 
 	shard, err := a.mgr.Open(ownerYear)
@@ -92,8 +105,16 @@ func (a *Analyzer) Analyze(ctx context.Context, jobID string, ownerYear int, sna
 	if cached, cerr := shard.GetAnalysisCache(ctx, cacheKey); cerr == nil && cached != nil {
 		events, verr := Validate(cached.OutputJSON, allowed)
 		if verr == nil {
+			model := cached.Model
+			if model == "" {
+				model = primary.model
+			}
+			protocol := cached.Provider
+			if protocol == "" {
+				protocol = primary.adapter
+			}
 			return &Analysis{Events: events, Mode: "ai_cache", Model: model,
-				Protocol: a.cfg.LLM.Adapter, UsageJSON: cached.UsageJSON, CacheHit: true}, nil
+				Protocol: protocol, UsageJSON: cached.UsageJSON, CacheHit: true}, nil
 		}
 		a.log.Warn("ignoring invalid analysis cache", "job_id", jobID, "error", logging.ErrorString(verr))
 	}
@@ -116,85 +137,136 @@ func (a *Analyzer) Analyze(ctx context.Context, jobID string, ownerYear int, sna
 
 	attempts := 1 + a.cfg.LLM.MaxRepairAttempts
 	var lastErr error
-	var lastContent string
 	var usageJSON string
 	var totalInput, totalOutput int
 	var totalCost int64
-	var problems []string
-	for attempt := 0; attempt < attempts; attempt++ {
-		var messages []chatMessage
-		if attempt == 0 {
-			messages = []chatMessage{
-				{Role: "system", Content: systemPrompt},
-				{Role: "user", Content: "窗口开始(Unix秒): " + itoa64(snap.WindowStart) +
-					"；窗口结束: " + itoa64(snap.WindowEnd) + "；候选材料：\n" + payload +
-					"\n请输出 JSON。"},
-			}
-		} else {
-			messages = []chatMessage{
-				{Role: "system", Content: repairSystemPrompt},
-				{Role: "user", Content: "上次输出：\n" + truncateUTF8(lastContent, 20000) +
-					"\n校验问题：\n- " + strings.Join(problems, "\n- ") +
-					"\n可用的文章 ID 仅限候选材料中的 refs。请只输出修复后的 JSON。"},
-			}
+	for pi, p := range providers {
+		if pi > 0 {
+			a.log.Warn("llm provider unavailable; falling back", "job_id", jobID,
+				"provider", p.name, "model", p.model, "error", logging.ErrorString(lastErr))
 		}
-		var call *storage.LLMCallReserve
-		var content string
-		var usage usageInfo
-		var apiErr error
-		for retry := 0; retry < llmTransientAttempts; retry++ {
-			call, content, usage, apiErr = a.doCall(ctx, shard, jobID, model, inputHash, estimatedInput, messages)
-			if apiErr == nil || !retryableLLMError(apiErr) || retry == llmTransientAttempts-1 {
+		var lastContent string
+		var problems []string
+		for attempt := 0; attempt < attempts; attempt++ {
+			var messages []chatMessage
+			if attempt == 0 {
+				messages = []chatMessage{
+					{Role: "system", Content: systemPrompt},
+					{Role: "user", Content: "窗口开始(Unix秒): " + itoa64(snap.WindowStart) +
+						"；窗口结束: " + itoa64(snap.WindowEnd) + "；候选材料：\n" + payload +
+						"\n请输出 JSON。"},
+				}
+			} else {
+				messages = []chatMessage{
+					{Role: "system", Content: repairSystemPrompt},
+					{Role: "user", Content: "上次输出：\n" + truncateUTF8(lastContent, 20000) +
+						"\n校验问题：\n- " + strings.Join(problems, "\n- ") +
+						"\n可用的文章 ID 仅限候选材料中的 refs。请只输出修复后的 JSON。"},
+				}
+			}
+			call, content, usage, apiErr := a.callWithRetry(ctx, shard, jobID, p, inputHash, estimatedInput, messages, attempt)
+			if apiErr != nil {
+				lastErr = apiErr
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
 				break
 			}
-			delay := llmRetryBaseDelay * time.Duration(1<<retry)
-			a.log.Warn("llm transient error; retrying", "job_id", jobID, "attempt", attempt,
-				"retry", retry+1, "delay", delay.String(), "error", logging.ErrorString(apiErr))
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(delay):
+			lastContent = content
+			usageJSON = usage.Raw
+			totalInput += usage.PromptTokens
+			totalOutput += usage.CompletionTokens
+			cost := a.costMicros(usage.PromptTokens, usage.CompletionTokens)
+			totalCost += cost
+			events, verr := Validate(content, allowed)
+			if verr == nil {
+				costPtr := cost
+				if err := a.finishCall(ctx, shard, call, "succeeded", usage, &costPtr, ""); err != nil {
+					a.log.Warn("failed to record llm success", "job_id", jobID, "error", logging.ErrorString(err))
+				}
+				if err := shard.PutAnalysisCache(ctx, storage.CachedAnalysis{
+					CacheKey: cacheKey, OutputJSON: content, UsageJSON: usage.Raw, CostMicros: &costPtr,
+				}, inputHash, refsJSON(allowed), p.adapter, p.model,
+					a.cfg.LLM.PromptVersion, SchemaVersion, a.cfg.LLM.Currency, a.clk.Now().Unix()); err != nil {
+					a.log.Warn("failed to store analysis cache", "job_id", jobID, "error", logging.ErrorString(err))
+				}
+				a.log.Info("llm analysis finished", "job_id", jobID, "provider", p.name, "model", p.model,
+					"fallback", pi > 0, "events", len(events), "cache_hit", false,
+					"input_tokens", totalInput, "output_tokens", totalOutput)
+				return &Analysis{Events: events, Mode: "ai", Model: p.model, Protocol: p.adapter,
+					UsageJSON: usageJSON, RawResponse: content}, nil
 			}
-		}
-		if apiErr != nil {
-			lastErr = apiErr
-			break
-		}
-		lastContent = content
-		usageJSON = usage.Raw
-		totalInput += usage.PromptTokens
-		totalOutput += usage.CompletionTokens
-		cost := a.costMicros(usage.PromptTokens, usage.CompletionTokens)
-		totalCost += cost
-		events, verr := Validate(content, allowed)
-		if verr == nil {
+			lastErr = verr
+			problems = verr.(*ValidationError).Problems
 			costPtr := cost
-			if err := a.finishCall(ctx, shard, call, "succeeded", usage, &costPtr, ""); err != nil {
-				a.log.Warn("failed to record llm success", "job_id", jobID, "error", logging.ErrorString(err))
+			if err := a.finishCall(ctx, shard, call, "validation_failed", usage, &costPtr, "validation_failed"); err != nil {
+				a.log.Warn("failed to record llm validation failure", "job_id", jobID, "error", logging.ErrorString(err))
 			}
-			if err := shard.PutAnalysisCache(ctx, storage.CachedAnalysis{
-				CacheKey: cacheKey, OutputJSON: content, UsageJSON: usage.Raw, CostMicros: &costPtr,
-			}, inputHash, refsJSON(allowed), a.cfg.LLM.Adapter, model,
-				a.cfg.LLM.PromptVersion, SchemaVersion, a.cfg.LLM.Currency, a.clk.Now().Unix()); err != nil {
-				a.log.Warn("failed to store analysis cache", "job_id", jobID, "error", logging.ErrorString(err))
-			}
-			a.log.Info("llm analysis finished", "job_id", jobID, "model", model,
-				"events", len(events), "cache_hit", false, "input_tokens", totalInput, "output_tokens", totalOutput)
-			return &Analysis{Events: events, Mode: "ai", Model: model, Protocol: a.cfg.LLM.Adapter,
-				UsageJSON: usageJSON, RawResponse: content}, nil
+			a.log.Warn("llm output invalid", "job_id", jobID, "provider", p.name,
+				"attempt", attempt, "error", logging.ErrorString(verr))
 		}
-		lastErr = verr
-		problems = verr.(*ValidationError).Problems
-		costPtr := cost
-		if err := a.finishCall(ctx, shard, call, "validation_failed", usage, &costPtr, "validation_failed"); err != nil {
-			a.log.Warn("failed to record llm validation failure", "job_id", jobID, "error", logging.ErrorString(err))
-		}
-		a.log.Warn("llm output invalid", "job_id", jobID, "attempt", attempt, "error", logging.ErrorString(verr))
 	}
 	if lastErr == nil {
 		lastErr = errors.New("no llm attempt completed")
 	}
 	return nil, lastErr
+}
+
+func (a *Analyzer) callWithRetry(ctx context.Context, shard *storage.Shard, jobID string, p llmProvider,
+	inputHash string, estimatedInput int, messages []chatMessage, attempt int) (*storage.LLMCallReserve, string, usageInfo, error) {
+	var call *storage.LLMCallReserve
+	var content string
+	var usage usageInfo
+	var apiErr error
+	for retry := 0; retry < llmTransientAttempts; retry++ {
+		call, content, usage, apiErr = a.doCall(ctx, shard, jobID, p, inputHash, estimatedInput, messages)
+		if apiErr == nil || !retryableLLMError(apiErr) || retry == llmTransientAttempts-1 {
+			break
+		}
+		delay := llmRetryBaseDelay * time.Duration(1<<retry)
+		a.log.Warn("llm transient error; retrying", "job_id", jobID, "provider", p.name, "model", p.model,
+			"attempt", attempt, "retry", retry+1, "delay", delay.String(), "error", logging.ErrorString(apiErr))
+		select {
+		case <-ctx.Done():
+			return call, "", usage, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+	return call, content, usage, apiErr
+}
+
+func (a *Analyzer) providerChain() ([]llmProvider, error) {
+	primary := llmProvider{
+		name:         "primary",
+		adapter:      a.cfg.LLM.Adapter,
+		baseURL:      a.cfg.LLMBaseURL(),
+		apiKey:       a.cfg.LLMAPIKey(),
+		model:        a.cfg.LLMModel(),
+		responseMode: a.cfg.LLM.ResponseMode,
+	}
+	if primary.baseURL == "" || primary.apiKey == "" || primary.model == "" {
+		return nil, errors.New("primary llm provider is missing base URL, API key, or model")
+	}
+	providers := []llmProvider{primary}
+	for i, f := range a.cfg.LLM.FallbackProviders {
+		name := f.Name
+		if name == "" {
+			name = fmt.Sprintf("fallback-%d", i+1)
+		}
+		p := llmProvider{
+			name:         name,
+			adapter:      f.Adapter,
+			baseURL:      f.BaseURL(),
+			apiKey:       f.APIKey(),
+			model:        f.Model(),
+			responseMode: f.ResponseMode,
+		}
+		if p.baseURL == "" || p.apiKey == "" || p.model == "" {
+			return nil, fmt.Errorf("fallback llm provider %s is missing base URL, API key, or model", name)
+		}
+		providers = append(providers, p)
+	}
+	return providers, nil
 }
 
 func (a *Analyzer) dayBounds() (int64, int64) {
@@ -267,13 +339,13 @@ func retryableLLMError(err error) bool {
 	return apiErr.HTTPStatus == http.StatusTooManyRequests || apiErr.HTTPStatus >= 500
 }
 
-func (a *Analyzer) doCall(ctx context.Context, shard *storage.Shard, jobID, model, inputHash string,
-	estimatedInput int, messages []chatMessage) (*storage.LLMCallReserve, string, usageInfo, error) {
+func (a *Analyzer) doCall(ctx context.Context, shard *storage.Shard, jobID string, p llmProvider,
+	inputHash string, estimatedInput int, messages []chatMessage) (*storage.LLMCallReserve, string, usageInfo, error) {
 	call := &storage.LLMCallReserve{
 		JobID:                jobID,
 		RequestedAt:          a.clk.Now().Unix(),
-		Provider:             a.cfg.LLM.Adapter,
-		Model:                model,
+		Provider:             p.adapter,
+		Model:                p.model,
 		InputHash:            inputHash,
 		Status:               "reserved",
 		ReservedInputTokens:  estimatedInput,
@@ -283,12 +355,12 @@ func (a *Analyzer) doCall(ctx context.Context, shard *storage.Shard, jobID, mode
 		return call, "", usageInfo{}, err
 	}
 	reqBody := chatRequest{
-		Model:       model,
+		Model:       p.model,
 		Messages:    messages,
 		Temperature: 0.2,
 		MaxTokens:   a.cfg.LLM.MaxOutputTokens,
 	}
-	switch a.cfg.LLM.ResponseMode {
+	switch p.responseMode {
 	case "json_object":
 		reqBody.ResponseFormat = &responseFormat{Type: "json_object"}
 	case "json_schema":
@@ -298,8 +370,7 @@ func (a *Analyzer) doCall(ctx context.Context, shard *storage.Shard, jobID, mode
 	if err != nil {
 		return call, "", usageInfo{}, err
 	}
-	base := a.cfg.LLMBaseURL()
-	endpoint, err := chatEndpoint(base)
+	endpoint, err := chatEndpoint(p.baseURL)
 	if err != nil {
 		_ = a.finishCall(ctx, shard, call, "failed", usageInfo{}, nil, "bad_base_url")
 		return call, "", usageInfo{}, &APIError{Code: "bad_base_url", Message: logging.Redact(err.Error())}
@@ -310,7 +381,7 @@ func (a *Analyzer) doCall(ctx context.Context, shard *storage.Shard, jobID, mode
 		return call, "", usageInfo{}, &APIError{Code: "bad_request", Message: logging.Redact(err.Error())}
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+a.cfg.LLMAPIKey())
+	req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	req.Header.Set("Accept", "application/json")
 	// The API key must never be sent to a different host through a redirect;
 	// CheckRedirect above rejects all redirects.
